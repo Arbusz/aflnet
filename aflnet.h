@@ -30,6 +30,9 @@ typedef struct {
   u32 selected_seed_index;    /* the recently selected seed index */
   void **seeds;               /* keeps all seeds reaching this state -- can be casted to struct queue_entry* */
   u32 seeds_count;            /* total number of seeds, it must be equal the size of the seeds array */
+  u32 depth;                  /* distance from the current state to the entry state */
+  u8* trace_mini; 
+  u32 bits_covered;          /* total number of covered paths when visiting this state */
 } state_info_t;
 
 enum {
