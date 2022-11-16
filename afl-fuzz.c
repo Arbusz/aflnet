@@ -434,7 +434,9 @@ void destroy_ipsm()
   kh_destroy(hs32, khs_ipsm_paths);
 
   state_info_t *state;
-  kh_foreach_value(khms_states, state, {ck_free(state->seeds); ck_free(state->trace_mini); ck_free(state);});
+  kh_foreach_value(khms_states, state, {ck_free(state->seeds); ck_free(state);});
+
+  // kh_foreach_value(khms_states, state, {ck_free(state->seeds); ck_free(state->trace_mini); ck_free(state);});
   kh_destroy(hms, khms_states);
 
   ck_free(state_ids);
@@ -624,6 +626,8 @@ u32 update_scores_and_select_next_state(u8 mode) {
       switch(mode) {
         case FAVOR:
           // state->score = ceil(1000 * pow(2, -log10(log10(state->fuzzs + 1) * state->selected_times + 1)) * pow(2, log(state->paths_discovered + 1)));
+          state->score = ceil(1000 * pow(2, -log10(log10(state->fuzzs + 1) * state->selected_times + 1)) * pow(2, log(state->depth + 1)));
+
           state->score = ceil(1000 * pow(2, -log10(log10(state->fuzzs + 1) * state->selected_times + 1)) * 
                                           pow(2, log(state->bits_covered + 1) * log(state->depth + 1))* pow(2, log(state->paths_discovered + 1)));
           
@@ -848,9 +852,9 @@ void update_state_aware_variables(struct queue_entry *q, u8 dry_run)
           newState_From->seeds = NULL;
           newState_From->seeds_count = 0;
           newState_From->depth = i;
-          newState_From->trace_mini = ck_alloc(MAP_SIZE >> 3);
-          merge_minimize_bits(newState_From->trace_mini, q->trace_mini);
-          newState_From->bits_covered = count_minibits(newState_From->trace_mini);
+          // newState_From->trace_mini = ck_alloc(MAP_SIZE >> 3);
+          // merge_minimize_bits(newState_From->trace_mini, q->trace_mini);
+          // newState_From->bits_covered = count_minibits(newState_From->trace_mini);
 
           k = kh_put(hms, khms_states, prevStateID, &discard);
           kh_value(khms_states, k) = newState_From;
@@ -885,9 +889,9 @@ void update_state_aware_variables(struct queue_entry *q, u8 dry_run)
           newState_To->seeds = NULL;
           newState_To->seeds_count = 0;
           newState_To->depth = i+1; //to:i+1
-          newState_To->trace_mini = ck_alloc(MAP_SIZE >> 3);
-          merge_minimize_bits(newState_To->trace_mini, q->trace_mini);
-          newState_To->bits_covered = count_minibits(newState_To->trace_mini);
+          // newState_To->trace_mini = ck_alloc(MAP_SIZE >> 3);
+          // merge_minimize_bits(newState_To->trace_mini, q->trace_mini);
+          // newState_To->bits_covered = count_minibits(newState_To->trace_mini);
 
           k = kh_put(hms, khms_states, curStateID, &discard);
           kh_value(khms_states, k) = newState_To;
@@ -945,8 +949,8 @@ void update_state_aware_variables(struct queue_entry *q, u8 dry_run)
     state->seeds = (void **) ck_realloc (state->seeds, (state->seeds_count + 1) * sizeof(void *));
     state->seeds[state->seeds_count] = (void *)q;
     state->seeds_count++;
-    merge_minimize_bits(state->trace_mini, q->trace_mini);
-    state->bits_covered = count_minibits(state->trace_mini);
+    // merge_minimize_bits(state->trace_mini, q->trace_mini);
+    // state->bits_covered = count_minibits(state->trace_mini);
 
     was_fuzzed_map[0][q->index] = 0; //Mark it as reachable but not fuzzed
   } else {
@@ -967,8 +971,8 @@ void update_state_aware_variables(struct queue_entry *q, u8 dry_run)
         state->seeds[state->seeds_count] = (void *)q;
         state->seeds_count++;
         state->depth = min(state->depth,regional_state_count);
-        merge_minimize_bits(state->trace_mini, q->trace_mini);
-        state->bits_covered = count_minibits(state->trace_mini);
+        // merge_minimize_bits(state->trace_mini, q->trace_mini);
+        // state->bits_covered = count_minibits(state->trace_mini);
       } else {
         //XXX. This branch is supposed to be not reachable
         //However, due to some undeterminism, new state could be seen during regions' annotating process
@@ -990,9 +994,9 @@ void update_state_aware_variables(struct queue_entry *q, u8 dry_run)
         newState->seeds[0] = (void *)q;
         newState->seeds_count = 1;
         newState->depth = q->unique_state_count; // set a big num
-        newState->trace_mini = ck_alloc(MAP_SIZE >> 3);
-        merge_minimize_bits(newState->trace_mini, q->trace_mini);
-        newState->bits_covered = count_minibits(newState->trace_mini);
+        // newState->trace_mini = ck_alloc(MAP_SIZE >> 3);
+        // merge_minimize_bits(newState->trace_mini, q->trace_mini);
+        // newState->bits_covered = count_minibits(newState->trace_mini);
 
         k = kh_put(hms, khms_states, reachable_state_id, &discard);
         kh_value(khms_states, k) = newState;
