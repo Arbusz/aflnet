@@ -71,6 +71,7 @@
 #include "aflnet.h"
 #include <graphviz/gvc.h>
 #include <math.h>
+#define min(a,b) ((a) < (b) ? (a) : (b))
 
 #if defined(__APPLE__) || defined(__FreeBSD__) || defined (__OpenBSD__)
 #  include <sys/sysctl.h>
@@ -433,7 +434,7 @@ void destroy_ipsm()
   kh_destroy(hs32, khs_ipsm_paths);
 
   state_info_t *state;
-  kh_foreach_value(khms_states, state, {ck_free(state->seeds); ck_free(state);});
+  kh_foreach_value(khms_states, state, {ck_free(state->seeds); ck_free(state->trace_mini); ck_free(state);});
   kh_destroy(hms, khms_states);
 
   ck_free(state_ids);
@@ -622,7 +623,10 @@ u32 update_scores_and_select_next_state(u8 mode) {
       state = kh_val(khms_states, k);
       switch(mode) {
         case FAVOR:
-          state->score = ceil(1000 * pow(2, -log10(log10(state->fuzzs + 1) * state->selected_times + 1)) * pow(2, log(state->paths_discovered + 1)));
+          // state->score = ceil(1000 * pow(2, -log10(log10(state->fuzzs + 1) * state->selected_times + 1)) * pow(2, log(state->paths_discovered + 1)));
+          state->score = ceil(1000 * pow(2, -log10(log10(state->fuzzs + 1) * state->selected_times + 1)) * 
+                                          pow(2, log(state->bits_covered + 1) * log(state->depth + 1))* pow(2, log(state->paths_discovered + 1)));
+          
           break;
         //other cases are reserved
       }
@@ -757,6 +761,37 @@ struct queue_entry *choose_seed(u32 target_state_id, u8 mode)
   return result;
 }
 
+//calculate 'or'
+static void merge_minimize_bits(u8* dst, u8* tag) {
+
+  u32 i = 0;
+
+  while (i < MAP_SIZE) {
+
+    dst[i >> 3] = ((dst[i >> 3] & 1 << (i & 7))| (tag[i >> 3] & 1 << (i & 7)));
+    i++;
+
+  }
+
+}
+
+
+
+u32 count_minibits(u8* bitmap)
+{
+  int total = 0;
+  u8 a[8] = {0x01,0x02,0x04,0x08,0x10,0x20,0x40,0x80};
+  for(int i = 0; i<(int)((MAP_SIZE >> 3)*sizeof(u8)); i++)
+  {
+    for(int j=0; j<8; j++)
+    {
+      if ((bitmap[i]&a[j]))
+          total++;
+    }
+  }
+  return total;
+}
+
 /* Update state-aware variables */
 void update_state_aware_variables(struct queue_entry *q, u8 dry_run)
 {
@@ -812,6 +847,10 @@ void update_state_aware_variables(struct queue_entry *q, u8 dry_run)
           newState_From->selected_seed_index = 0;
           newState_From->seeds = NULL;
           newState_From->seeds_count = 0;
+          newState_From->depth = i;
+          newState_From->trace_mini = ck_alloc(MAP_SIZE >> 3);
+          merge_minimize_bits(newState_From->trace_mini, q->trace_mini);
+          newState_From->bits_covered = count_minibits(newState_From->trace_mini);
 
           k = kh_put(hms, khms_states, prevStateID, &discard);
           kh_value(khms_states, k) = newState_From;
@@ -821,6 +860,9 @@ void update_state_aware_variables(struct queue_entry *q, u8 dry_run)
           state_ids[state_ids_count++] = prevStateID;
 
           if (prevStateID != 0) expand_was_fuzzed_map(1, 0);
+        } else {
+          k = kh_get(hms, khms_states, prevStateID);
+          kh_val(khms_states, k)->depth = min(kh_val(khms_states, k)->depth,i);
         }
 
 		    to = agnode(ipsm, toState, FALSE);
@@ -842,6 +884,10 @@ void update_state_aware_variables(struct queue_entry *q, u8 dry_run)
           newState_To->selected_seed_index = 0;
           newState_To->seeds = NULL;
           newState_To->seeds_count = 0;
+          newState_To->depth = i+1; //to:i+1
+          newState_To->trace_mini = ck_alloc(MAP_SIZE >> 3);
+          merge_minimize_bits(newState_To->trace_mini, q->trace_mini);
+          newState_To->bits_covered = count_minibits(newState_To->trace_mini);
 
           k = kh_put(hms, khms_states, curStateID, &discard);
           kh_value(khms_states, k) = newState_To;
@@ -851,6 +897,9 @@ void update_state_aware_variables(struct queue_entry *q, u8 dry_run)
           state_ids[state_ids_count++] = curStateID;
 
           if (curStateID != 0) expand_was_fuzzed_map(1, 0);
+        } else {
+          k = kh_get(hms, khms_states, curStateID);
+          kh_val(khms_states, k)->depth = min(kh_val(khms_states, k)->depth,i+1);
         }
 
         //Check if an edge from->to exists
@@ -896,6 +945,8 @@ void update_state_aware_variables(struct queue_entry *q, u8 dry_run)
     state->seeds = (void **) ck_realloc (state->seeds, (state->seeds_count + 1) * sizeof(void *));
     state->seeds[state->seeds_count] = (void *)q;
     state->seeds_count++;
+    merge_minimize_bits(state->trace_mini, q->trace_mini);
+    state->bits_covered = count_minibits(state->trace_mini);
 
     was_fuzzed_map[0][q->index] = 0; //Mark it as reachable but not fuzzed
   } else {
@@ -915,6 +966,9 @@ void update_state_aware_variables(struct queue_entry *q, u8 dry_run)
         state->seeds = (void **) ck_realloc (state->seeds, (state->seeds_count + 1) * sizeof(void *));
         state->seeds[state->seeds_count] = (void *)q;
         state->seeds_count++;
+        state->depth = min(state->depth,regional_state_count);
+        merge_minimize_bits(state->trace_mini, q->trace_mini);
+        state->bits_covered = count_minibits(state->trace_mini);
       } else {
         //XXX. This branch is supposed to be not reachable
         //However, due to some undeterminism, new state could be seen during regions' annotating process
@@ -935,6 +989,10 @@ void update_state_aware_variables(struct queue_entry *q, u8 dry_run)
         newState->seeds = (void **) ck_realloc (newState->seeds, sizeof(void *));
         newState->seeds[0] = (void *)q;
         newState->seeds_count = 1;
+        newState->depth = q->unique_state_count; // set a big num
+        newState->trace_mini = ck_alloc(MAP_SIZE >> 3);
+        merge_minimize_bits(newState->trace_mini, q->trace_mini);
+        newState->bits_covered = count_minibits(newState->trace_mini);
 
         k = kh_put(hms, khms_states, reachable_state_id, &discard);
         kh_value(khms_states, k) = newState;
@@ -2085,7 +2143,7 @@ static void minimize_bits(u8* dst, u8* src) {
    contender, or if the contender has smaller unique state count or
    it has a more favorable speed x size factor. */
 
-static void update_bitmap_score(struct queue_entry* q) {
+static void update_bitmap_score(struct queue_entry* q, u8 dry_run) {
 
   u32 i;
   u64 fav_factor = q->exec_us * q->len;
@@ -2130,9 +2188,26 @@ static void update_bitmap_score(struct queue_entry* q) {
        score_changed = 1;
 
      }
+  if (state_aware_mode) update_state_aware_variables(q, dry_run);
+
 
 }
 
+
+static void no_update_bitmap_score(struct queue_entry* q, u8 dry_run) {
+
+  /* For every byte set in trace_bits[], see if there is a previous winner,
+     and how it compares to us. */
+  if (state_aware_mode) 
+    if (!q->trace_mini) {
+      q->trace_mini = ck_alloc(MAP_SIZE >> 3);
+      minimize_bits(q->trace_mini, trace_bits);
+      update_state_aware_variables(q, dry_run);
+      ck_free(q->trace_mini);
+      q->trace_mini = 0;
+    }
+
+}
 
 /* The second part of the mechanism discussed above is a routine that
    goes over top_rated[] entries, and then sequentially grabs winners for
@@ -3385,7 +3460,7 @@ static void show_stats(void);
    new paths are discovered to detect variable behavior and so on. */
 
 static u8 calibrate_case(char** argv, struct queue_entry* q, u8* use_mem,
-                         u32 handicap, u8 from_queue) {
+                         u32 handicap, u8 from_queue, u8 dry_run) {
 
   static u8 first_trace[MAP_SIZE];
 
@@ -3492,7 +3567,7 @@ static u8 calibrate_case(char** argv, struct queue_entry* q, u8* use_mem,
   total_bitmap_size += q->bitmap_size;
   total_bitmap_entries++;
 
-  update_bitmap_score(q);
+  update_bitmap_score(q, dry_run);
 
   /* If this case didn't result in new output from the instrumentation, tell
      parent. This is a non-critical problem, but something to warn the user
@@ -3519,6 +3594,8 @@ abort_calibration:
     }
 
   }
+
+  no_update_bitmap_score(q, dry_run);
 
   stage_name = old_sn;
   stage_cur  = old_sc;
@@ -3581,11 +3658,11 @@ static void perform_dry_run(char** argv) {
     /* AFLNet construct the kl_messages linked list for this queue entry*/
     kl_messages = construct_kl_messages(q->fname, q->regions, q->region_count);
 
-    res = calibrate_case(argv, q, use_mem, 0, 1);
+    res = calibrate_case(argv, q, use_mem, 0, 1, 1);
     ck_free(use_mem);
 
-    /* Update state-aware variables (e.g., state machine, regions and their annotations */
-    if (state_aware_mode) update_state_aware_variables(q, 1);
+    // /* Update state-aware variables (e.g., state machine, regions and their annotations */
+    // if (state_aware_mode) update_state_aware_variables(q, 1);
 
     /* save the seed to file for replaying */
     u8 *fn_replay = alloc_printf("%s/replayable-queue/%s", out_dir, basename(q->fname));
@@ -4019,7 +4096,7 @@ static u8 save_if_interesting(char** argv, void* mem, u32 len, u8 fault) {
     /* We use the actual length of all messages (full_len), not the len of the mutated message subsequence (len)*/
     add_to_queue(fn, full_len, 0);
 
-    if (state_aware_mode) update_state_aware_variables(queue_top, 0);
+    // if (state_aware_mode) update_state_aware_variables(queue_top, 0);
 
     /* save the seed to file for replaying */
     u8 *fn_replay = alloc_printf("%s/replayable-queue/%s", out_dir, basename(queue_top->fname));
@@ -4036,7 +4113,7 @@ static u8 save_if_interesting(char** argv, void* mem, u32 len, u8 fault) {
     /* Try to calibrate inline; this also calls update_bitmap_score() when
        successful. */
 
-    res = calibrate_case(argv, queue_top, mem, queue_cycle - 1, 0);
+    res = calibrate_case(argv, queue_top, mem, queue_cycle - 1, 0, 0);
 
     if (res == FAULT_ERROR)
       FATAL("Unable to execute target application");
