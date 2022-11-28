@@ -394,7 +394,7 @@ u8 terminate_child = 0;
 u8 corpus_read_or_sync = 0;
 u8 state_aware_mode = 0;
 u8 region_level_mutation = 0;
-u8 state_selection_algo = ROUND_ROBIN, seed_selection_algo = RANDOM_SELECTION;
+u8 state_selection_algo = FAVOR, seed_selection_algo = FAVOR;
 u8 false_negative_reduction = 0;
 
 /* Implemented state machine */
