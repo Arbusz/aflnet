@@ -434,10 +434,10 @@ void destroy_ipsm()
   kh_destroy(hs32, khs_ipsm_paths);
 
   state_info_t *state;
-  kh_foreach_value(khms_states, state, {ck_free(state->seeds); ck_free(state);});
+  //kh_foreach_value(khms_states, state, {ck_free(state->seeds); ck_free(state);});
 
   kh_foreach_value(khms_states, state, {ck_free(state->seeds); ck_free(state->trace_mini); ck_free(state);});
-  // kh_destroy(hms, khms_states);
+  kh_destroy(hms, khms_states);
 
   ck_free(state_ids);
 }
@@ -2192,7 +2192,17 @@ static void update_bitmap_score(struct queue_entry* q, u8 dry_run) {
        score_changed = 1;
 
   }
-  if (state_aware_mode) update_state_aware_variables(q, dry_run);
+  if (state_aware_mode) {
+    if (!q->trace_mini) {
+      q->trace_mini = ck_alloc(MAP_SIZE >> 3);
+      minimize_bits(q->trace_mini, trace_bits);
+      update_state_aware_variables(q, dry_run);
+      ck_free(q->trace_mini);
+      q->trace_mini = 0;
+    } else {
+        update_state_aware_variables(q, dry_run);
+    }
+  }
 
 
 }
